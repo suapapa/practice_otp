@@ -7,6 +7,7 @@ import (
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
+	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 )
 
@@ -46,11 +47,27 @@ func loginHandler(c *gin.Context) {
 	}
 }
 
+func GeneratePassCode(secret string) string {
+	// secret = base32.StdEncoding.EncodeToString([]byte(secret))
+	passcode, err := totp.GenerateCodeCustom(secret, time.Now(), totp.ValidateOpts{
+		Period:    30,
+		Skew:      1,
+		Digits:    otp.DigitsSix,
+		Algorithm: otp.AlgorithmSHA1,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return passcode
+}
+
 func generateOTPHandler(c *gin.Context) {
 	email := c.Query("email")
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "homin.dev",
 		AccountName: email,
+		Digits:      otp.DigitsSix,
+		Algorithm:   otp.AlgorithmSHA1,
 	})
 	if err != nil {
 		c.JSON(500, gin.H{
@@ -62,6 +79,12 @@ func generateOTPHandler(c *gin.Context) {
 	// TODO: send key.Secret to homin.dev
 	log.Printf("key.Secret: %v", key.Secret())
 	otpCache[email] = key.Secret()
+	time.Sleep(time.Second)
+	passCode := GeneratePassCode(key.Secret())
+	log.Printf("passCode: %v", passCode)
+	time.Sleep(time.Second)
+	passCode = GeneratePassCode(key.Secret())
+	log.Printf("passCode: %v", passCode)
 
 	c.JSON(200, gin.H{
 		"message": "OK",
@@ -71,7 +94,7 @@ func generateOTPHandler(c *gin.Context) {
 func submitOTPHandler(c *gin.Context) {
 	email := c.Query("email")
 	otp := c.Query("otp")
-	if secret, ok := otpCache[email]; ok && secret == otp {
+	if secret, ok := otpCache[email]; ok && totp.Validate(otp, secret) {
 		// generate JWT token
 		token, err := createToken(email)
 		if err != nil {

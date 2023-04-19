@@ -3,6 +3,8 @@ package main
 import (
 	"html/template"
 	"log"
+	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -14,7 +16,17 @@ import (
 var (
 	otpCache    = map[string]string{}
 	tokenSecret = []byte("secret") // TODO: change to env
+
+	indexTmpl *template.Template
 )
+
+func init() {
+	var err error
+	indexTmpl, err = template.ParseGlob("template/*.html")
+	if err != nil {
+		log.Fatalf("template.ParseGlob: %v", err)
+	}
+}
 
 func main() {
 	r := gin.New()
@@ -31,14 +43,7 @@ func main() {
 
 func loginHandler(c *gin.Context) {
 	c.Header("cess-Control-Allow-Origin", "*")
-	indexTmpl, err := template.ParseGlob("template/*.html")
-	if err != nil {
-		c.JSON(500, gin.H{
-			"message": "Internal Server Error",
-		})
-		return
-	}
-	err = indexTmpl.ExecuteTemplate(c.Writer, "index.html", nil)
+	err := indexTmpl.ExecuteTemplate(c.Writer, "index.html", c.Request.URL.Hostname())
 	if err != nil {
 		c.JSON(500, gin.H{
 			"message": "Internal Server Error",
@@ -83,8 +88,6 @@ func generateOTPHandler(c *gin.Context) {
 	passCode := GeneratePassCode(key.Secret())
 	log.Printf("passCode: %v", passCode)
 	time.Sleep(time.Second)
-	passCode = GeneratePassCode(key.Secret())
-	log.Printf("passCode: %v", passCode)
 
 	c.JSON(200, gin.H{
 		"message": "OK",
@@ -105,17 +108,15 @@ func submitOTPHandler(c *gin.Context) {
 		}
 
 		// save JWT token to cookie
-		c.SetCookie("token", token, 3600, "/", "localhost", false, true)
+		c.SetCookie("token", token, 3600, "/", c.Request.URL.Hostname(), false, true)
 		c.JSON(200, gin.H{
 			"message": "OK",
 		})
 		return
 	}
 
-	c.JSON(401, gin.H{
-		"message": "Unauthorized",
-	})
-	return
+	location := url.URL{Path: "/login"}
+	c.Redirect(http.StatusFound, location.RequestURI())
 }
 
 func helloHandler(c *gin.Context) {
@@ -147,9 +148,8 @@ func authMiddleWare(c *gin.Context) {
 	}
 
 unauthorized:
-	c.JSON(401, gin.H{
-		"message": "Unauthorized",
-	})
+	location := url.URL{Path: "/login"}
+	c.Redirect(http.StatusFound, location.RequestURI())
 	c.Abort()
 	return
 }
